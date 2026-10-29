@@ -1,0 +1,43 @@
+#!/bin/bash
+# postcheck: pre-post validation guard
+# Validates text before posting to GitHub:
+#   1. Rejects em dashes (U+2014)
+#   2. Rejects unpaired backticks (odd count after removing escaped and fenced pairs)
+#
+# Usage:
+#   echo "some text" | postcheck
+#   postcheck < file_to_check
+#   cat file | postcheck
+#
+# Exit codes:
+#   0 - text is clean, safe to post
+#   1 - issue detected, do not post
+
+input=$(cat)
+errors=0
+
+# --- Check 1: em dashes (U+2014) ---
+if printf '%s' "$input" | python3 -c "import sys; sys.exit(0 if chr(0x2014) in sys.stdin.read() else 1)" 2>/dev/null; then
+    printf 'ERROR: em dash (U+2014) detected. Rephrase with commas, periods, parentheses, or conjunctions instead.\n' >&2
+    errors=1
+fi
+
+# --- Check 2: unpaired backticks ---
+# Remove escaped backticks (\`), then count remaining.
+# Pairs (inline `code`, or fences ```...```) produce an even count.
+# An odd count means a missing or misplaced backtick.
+backtick_count=$(printf '%s' "$input" | python3 -c "
+import sys
+text = sys.stdin.read()
+# Remove escaped backticks
+text = text.replace(chr(0x5c) + chr(0x60), '')
+count = text.count(chr(0x60))
+print(count)
+" 2>/dev/null)
+
+if [ -n "$backtick_count" ] && [ $((backtick_count % 2)) -ne 0 ]; then
+    printf 'ERROR: unpaired backtick detected (%d backticks found, must be even). Close all inline code spans and code fences.\n' "$backtick_count" >&2
+    errors=1
+fi
+
+exit $errors
